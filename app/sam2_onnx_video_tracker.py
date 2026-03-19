@@ -16,7 +16,7 @@ import onnxruntime as ort
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
-NUM_MASKMEM = 7        # 1 conditioning + 6 non-conditioning
+NUM_MASKMEM = 3        # 1 conditioning + 6 non-conditioning
 IMG_SIZE = 1024        # SAM2 input resolution
 MEAN = np.array([123.675, 116.28, 103.53], dtype=np.float32)
 STD = np.array([58.395, 57.12, 57.375], dtype=np.float32)

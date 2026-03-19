@@ -2,9 +2,9 @@
 set -e
 
 function usage {
-    echo "usage: entrypoint.sh [-b/-r/-d] [--onnx]"
+    echo "usage: entrypoint.sh [-b/-r/-d] [--onnx/--hybrid]"
     echo "  -b  Build: export ONNX models + build TRT engines"
-    echo "  -r  Run tracker (TRT default, --onnx for ONNX runtime)"
+    echo "  -r  Run tracker (TRT default, --onnx for ONNX, --hybrid for TRT+ORT)"
     echo "  -d  Develop: bash shell"
 }
 
@@ -17,6 +17,7 @@ while [[ "$1" != "" ]]; do
     case $1 in
         -b | -r | -d ) ACTION=$1 ;;
         --onnx )       BACKEND="onnx" ;;
+        --hybrid )     BACKEND="hybrid" ;;
         -h )           usage && exit ;;
         * )            usage && exit ;;
     esac
@@ -32,6 +33,8 @@ if [[ $ACTION == '-b' ]]; then
 elif [[ $ACTION == '-r' ]]; then
     if [[ $BACKEND == "onnx" ]]; then
         bash /opt/scripts/run_onnx_tracker.sh
+    elif [[ $BACKEND == "hybrid" ]]; then
+        bash /opt/scripts/run_hybrid_tracker.sh
     else
         bash /opt/scripts/run_trt_tracker.sh
     fi

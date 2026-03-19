@@ -2,9 +2,9 @@
 cd "${0%/*}"
 
 function usage {
-    echo "usage: ./docker/launch.sh [-b/-d/-r] [--onnx]"
+    echo "usage: ./docker/launch.sh [-b/-d/-r] [--onnx/--hybrid]"
     echo "  -b  Build: setup models (export ONNX + build TRT engines)"
-    echo "  -r  Run tracker (TRT default, --onnx for ONNX runtime)"
+    echo "  -r  Run tracker (TRT default, --onnx for ONNX, --hybrid for TRT+ORT)"
     echo "  -d  Develop: bash shell inside container"
 }
 
@@ -17,6 +17,7 @@ while [[ "$1" != "" ]]; do
     case $1 in
         -b | -d | -r ) ACTION=$1 ;;
         --onnx )       BACKEND="--onnx" ;;
+        --hybrid )     BACKEND="--hybrid" ;;
         -h )           usage ; exit ;;
         * )            usage ; exit ;;
     esac

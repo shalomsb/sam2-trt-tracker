@@ -16,7 +16,8 @@ echo "[1/4] image_encoder"
 if [[ ! -f "$TRT_DIR/image_encoder.engine" ]]; then
     trtexec --onnx=$ONNX_DIR/image_encoder.onnx \
             --saveEngine=$TRT_DIR/image_encoder.engine \
-            --fp16
+            --fp16 \
+            --memPoolSize=workspace:4096
 else
     echo "    Already exists — skipping"
 fi
@@ -25,10 +26,7 @@ echo "[2/4] mask_decoder"
 if [[ ! -f "$TRT_DIR/mask_decoder.engine" ]]; then
     trtexec --onnx=$ONNX_DIR/mask_decoder.onnx \
             --saveEngine=$TRT_DIR/mask_decoder.engine \
-            --fp16 \
-            --minShapes=point_coords:1x1x2,point_labels:1x1,image_embed:1x256x64x64 \
-            --optShapes=point_coords:1x2x2,point_labels:1x2,image_embed:1x256x64x64 \
-            --maxShapes=point_coords:1x2x2,point_labels:1x2,image_embed:1x256x64x64
+            --fp16
 else
     echo "    Already exists — skipping"
 fi
@@ -50,6 +48,7 @@ if [[ ! -f "$TRT_DIR/memory_attention.engine" ]]; then
     trtexec --onnx=$ONNX_DIR/memory_attention.onnx \
             --saveEngine=$TRT_DIR/memory_attention.engine \
             --fp16 \
+            --builderOptimizationLevel=5 \
             --minShapes=memory_0:1x3x256,memory_1:1x3x64x64x64,memory_pos_embed:1x12300x64 \
             --optShapes=memory_0:1x3x256,memory_1:1x3x64x64x64,memory_pos_embed:1x12300x64 \
             --maxShapes=memory_0:1x3x256,memory_1:1x3x64x64x64,memory_pos_embed:1x12300x64
