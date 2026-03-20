@@ -6,12 +6,10 @@ VIDEO="${VIDEO:-/streams/sample.mp4}"
 POINT="${POINT:-640,360}"
 BBOX="${BBOX:-}"
 MODEL_DIR_TRT="${MODEL_DIR_TRT:-/models/sam2/tiny/trt/}"
-MODEL_DIR_ONNX="${MODEL_DIR_ONNX:-/models/sam2/tiny/onnx/}"
 CHECKPOINT="${CHECKPOINT:-/models/sam2/tiny/sam2.1_hiera_tiny.pt}"
 
 DURATION="${DURATION:-15}"
 MASKS_TRT="/output/masks_trt"
-MASKS_ONNX="/output/masks_onnx"
 MASKS_PT="/output/masks_pytorch"
 
 # Trim video to keep GPU memory manageable
@@ -28,17 +26,16 @@ else
 fi
 
 # Clean old results
-rm -rf "$MASKS_TRT" "$MASKS_ONNX" "$MASKS_PT" \
-    /output/iou_diff_trt_vs_pt /output/iou_overlay_trt_vs_pt \
-    /output/iou_diff_onnx_vs_pt /output/iou_overlay_onnx_vs_pt
+rm -rf "$MASKS_TRT" "$MASKS_PT" \
+    /output/iou_diff_trt_vs_pt /output/iou_overlay_trt_vs_pt
 
 echo "============================================"
-echo "  SAM2.1 — TRT / ONNX / PyTorch Comparison"
+echo "  SAM2.1 — TRT vs PyTorch Comparison"
 echo "============================================"
 
 # Step 1: Run TRT tracker
 echo ""
-echo ">>> [1/5] Running TRT tracker..."
+echo ">>> [1/3] Running TRT tracker..."
 python /app/sam2_trt_video_tracker.py \
     --video "$VIDEO" \
     $PROMPT_ARG \
@@ -46,28 +43,18 @@ python /app/sam2_trt_video_tracker.py \
     --output /output/output_tracked_trt.mp4 \
     --save-masks "$MASKS_TRT"
 
-# Step 2: Run ONNX tracker
+# Step 2: Run PyTorch tracker
 echo ""
-echo ">>> [2/5] Running ONNX tracker..."
-python /app/sam2_onnx_video_tracker.py \
-    --video "$VIDEO" \
-    $PROMPT_ARG \
-    --model-dir "$MODEL_DIR_ONNX" \
-    --output /output/output_tracked_onnx.mp4 \
-    --save-masks "$MASKS_ONNX"
-
-# Step 3: Run PyTorch tracker
-echo ""
-echo ">>> [3/5] Running PyTorch reference tracker..."
+echo ">>> [2/3] Running PyTorch reference tracker..."
 python /app/sam2_pytorch_video_tracker.py \
     --video "$VIDEO" \
     $PROMPT_ARG \
     --checkpoint "$CHECKPOINT" \
     --save-masks "$MASKS_PT"
 
-# Step 4: Compare TRT vs PyTorch
+# Step 3: Compare TRT vs PyTorch
 echo ""
-echo ">>> [4/5] Comparing TRT vs PyTorch..."
+echo ">>> [3/3] Comparing TRT vs PyTorch..."
 python /app/compare_masks.py \
     "$MASKS_TRT" "$MASKS_PT" \
     --label-a "TRT" \
@@ -75,17 +62,6 @@ python /app/compare_masks.py \
     --csv /output/iou_trt_vs_pytorch.csv \
     --viz-dir /output/iou_diff_trt_vs_pt \
     --overlay-dir /output/iou_overlay_trt_vs_pt
-
-# Step 5: Compare ONNX vs PyTorch
-echo ""
-echo ">>> [5/5] Comparing ONNX vs PyTorch..."
-python /app/compare_masks.py \
-    "$MASKS_ONNX" "$MASKS_PT" \
-    --label-a "ONNX" \
-    --label-b "PyTorch" \
-    --csv /output/iou_onnx_vs_pytorch.csv \
-    --viz-dir /output/iou_diff_onnx_vs_pt \
-    --overlay-dir /output/iou_overlay_onnx_vs_pt
 
 echo ""
 echo "Total comparison time: $((SECONDS - START))s"
