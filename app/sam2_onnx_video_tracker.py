@@ -161,9 +161,13 @@ def main():
                     help="Directory containing the 4 ONNX models")
     ap.add_argument("--output", default="/output/output_tracked_onnx.mp4",
                     help="Output video path")
+    ap.add_argument("--save-masks", default=None, help="Directory to save per-frame binary masks as .npz")
     ap.add_argument("--show", action="store_true",
                     help="Display frames live (press q to quit)")
     args = ap.parse_args()
+
+    if args.save_masks:
+        os.makedirs(args.save_masks, exist_ok=True)
 
     if not args.bbox and not args.point:
         ap.error("must provide --bbox or --point")
@@ -300,6 +304,8 @@ def main():
 
         # ── Visualize ───────────────────────────────────────────────
         binary_mask = postprocess_mask(pred_mask, orig_h, orig_w)
+        if args.save_masks:
+            np.savez_compressed(os.path.join(args.save_masks, f"{frame_idx:05d}.npz"), mask=binary_mask)
         vis = overlay_mask(frame, binary_mask)
 
         dt = time.perf_counter() - t0

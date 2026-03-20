@@ -265,8 +265,12 @@ def main():
     ap.add_argument("--point", help="x,y")
     ap.add_argument("--model-dir", default="/models/sam2/tiny/trt/")
     ap.add_argument("--output", default="/output/output_tracked_trt.mp4")
+    ap.add_argument("--save-masks", default=None, help="Directory to save per-frame binary masks as .npz")
     ap.add_argument("--show", action="store_true")
     args = ap.parse_args()
+
+    if args.save_masks:
+        os.makedirs(args.save_masks, exist_ok=True)
 
     if not args.bbox and not args.point:
         ap.error("must provide --bbox or --point")
@@ -468,6 +472,8 @@ def main():
             stats["memory_attention"].append(e_matt_s.elapsed_time(e_matt_e))
 
         binary_mask = mask_gpu.cpu().numpy()
+        if args.save_masks:
+            np.savez_compressed(os.path.join(args.save_masks, f"{frame_idx:05d}.npz"), mask=binary_mask)
         iou_val = iou.item()
         stats["iou"].append(iou_val)
 

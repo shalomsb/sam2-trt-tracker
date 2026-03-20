@@ -2,9 +2,10 @@
 set -e
 
 function usage {
-    echo "usage: entrypoint.sh [-b/-r/-d] [--onnx]"
+    echo "usage: entrypoint.sh [-b/-r/-c/-d] [--onnx]"
     echo "  -b  Build: export ONNX models + build TRT engines"
     echo "  -r  Run tracker (TRT default, --onnx for ONNX runtime)"
+    echo "  -c  Compare: run TRT + PyTorch trackers and compare masks"
     echo "  -d  Develop: bash shell"
 }
 
@@ -15,10 +16,10 @@ if [[ $# -lt 1 ]]; then usage && exit; fi
 
 while [[ "$1" != "" ]]; do
     case $1 in
-        -b | -r | -d ) ACTION=$1 ;;
-        --onnx )       BACKEND="onnx" ;;
-        -h )           usage && exit ;;
-        * )            usage && exit ;;
+        -b | -r | -c | -d ) ACTION=$1 ;;
+        --onnx )             BACKEND="onnx" ;;
+        -h )                 usage && exit ;;
+        * )                  usage && exit ;;
     esac
     shift
 done
@@ -35,6 +36,8 @@ elif [[ $ACTION == '-r' ]]; then
     else
         bash /opt/scripts/run_trt_tracker.sh
     fi
+elif [[ $ACTION == '-c' ]]; then
+    bash /opt/scripts/run_comparison.sh
 elif [[ $ACTION == '-d' ]]; then
     /bin/bash
 else

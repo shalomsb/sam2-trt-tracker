@@ -50,6 +50,9 @@ if [[ ! -f "sam2.1_hiera_tiny.pt" ]]; then
 else
     echo "    Already present"
 fi
+# Copy checkpoint to host-mounted models volume
+cp "$CKPT_DIR/sam2.1_hiera_tiny.pt" /models/sam2/tiny/sam2.1_hiera_tiny.pt
+echo "    Copied checkpoint to /models/sam2/tiny/"
 
 # ── Step 4: Export ONNX (tiny only) ──
 echo ""

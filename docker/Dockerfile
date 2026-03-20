@@ -20,6 +20,13 @@ RUN uv pip install --python /opt/venv/bin/python \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
     --no-cache-dir -r /opt/requirements.txt
 
+# SAM-2 package for PyTorch reference tracker (not on PyPI, install from GitHub)
+RUN SAM2_BUILD_CUDA=0 uv pip install --python /opt/venv/bin/python --no-cache-dir \
+    "SAM-2 @ git+https://github.com/facebookresearch/sam2.git"
+
+# Expose pip-installed CUDA 12 libs for onnxruntime-gpu
+ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/nvidia/cublas/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cufft/lib:/opt/venv/lib/python3.12/site-packages/nvidia/curand/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/opt/venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:${LD_LIBRARY_PATH}"
+
 # App code
 COPY app/ /app/
 
