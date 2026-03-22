@@ -37,6 +37,8 @@ def main():
     ap.add_argument("--checkpoint", default="/models/sam2/tiny/sam2.1_hiera_tiny.pt")
     ap.add_argument("--config", default="configs/sam2.1/sam2.1_hiera_t.yaml")
     ap.add_argument("--save-masks", required=True, help="Directory to save per-frame binary masks")
+    ap.add_argument("--save-bboxes", default=None,
+                    help="Path to write per-frame bbox CSV (frame_idx,x1,y1,x2,y2)")
     ap.add_argument("--max-frames", type=int, default=0, help="Stop after N frames (0=all)")
     args = ap.parse_args()
 
@@ -46,6 +48,15 @@ def main():
         ap.error("provide either --bbox or --point, not both")
 
     os.makedirs(args.save_masks, exist_ok=True)
+
+    bbox_csv_file = None
+    bbox_csv_writer = None
+    if args.save_bboxes:
+        import csv
+        os.makedirs(os.path.dirname(args.save_bboxes) or ".", exist_ok=True)
+        bbox_csv_file = open(args.save_bboxes, "w", newline="")
+        bbox_csv_writer = csv.writer(bbox_csv_file)
+        bbox_csv_writer.writerow(["frame_idx", "x1", "y1", "x2", "y2", "iou"])
 
     # Extract frames to a temp directory
     frame_dir = tempfile.mkdtemp(prefix="sam2_frames_")
@@ -90,11 +101,22 @@ def main():
                 os.path.join(args.save_masks, f"{frame_idx:05d}.npz"),
                 mask=mask,
             )
+            if bbox_csv_writer is not None:
+                ys, xs = np.where(mask)
+                if len(xs) > 0:
+                    bbox_csv_writer.writerow([frame_idx, xs.min(), ys.min(),
+                                              xs.max(), ys.max(), ""])
+                else:
+                    bbox_csv_writer.writerow([frame_idx, "", "", "", "", ""])
             saved += 1
             if frame_idx % 50 == 0:
                 print(f"  [{frame_idx:5d}/{num_frames}]")
             if args.max_frames and saved >= args.max_frames:
                 break
+
+    if bbox_csv_file:
+        bbox_csv_file.close()
+        print(f"Bboxes written to {args.save_bboxes}")
 
     elapsed = time.perf_counter() - t0
     fps = saved / elapsed if elapsed > 0 else 0

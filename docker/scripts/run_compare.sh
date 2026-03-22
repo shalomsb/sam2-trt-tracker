@@ -8,6 +8,7 @@ MODEL_DIR="${MODEL_DIR:-/models/sam2/tiny/trt/}"
 ONNX_DIR="${ONNX_DIR:-/models/sam2/tiny/onnx/}"
 CHECKPOINT="${CHECKPOINT:-/models/sam2/tiny/sam2.1_hiera_tiny.pt}"
 MAX_FRAMES="${MAX_FRAMES:-350}"
+MODE="${1:-}"
 
 MASKS_HYBRID="/output/masks_hybrid"
 MASKS_TORCH="/output/masks_torch"
@@ -21,9 +22,15 @@ else
     PROMPT_ARG="--point $POINT"
 fi
 
-echo "============================================"
-echo "  Mask Comparison: Hybrid vs PyTorch"
-echo "============================================"
+if [[ "$MODE" == "bbox" ]]; then
+    echo "============================================"
+    echo "  Bbox Comparison: Hybrid vs PyTorch"
+    echo "============================================"
+else
+    echo "============================================"
+    echo "  Mask Comparison: Hybrid vs PyTorch"
+    echo "============================================"
+fi
 
 # Download checkpoint if not present
 if [[ ! -f "$CHECKPOINT" ]]; then
@@ -45,49 +52,102 @@ rm -rf "$MASKS_HYBRID" "$MASKS_TORCH" "$OVERLAY_DIR" "$CSV_OUT" /output/compare_
 
 # Step 1: Run hybrid tracker with mask saving
 echo ""
-echo ">>> [1/3] Running hybrid tracker..."
-python /app/sam2_hybrid_video_tracker.py \
-    --video "$VIDEO" \
-    $PROMPT_ARG \
-    --model-dir "$MODEL_DIR" \
-    --onnx-dir "$ONNX_DIR" \
-    --output /output/output_tracked_hybrid.mp4 \
-    --save-masks "$MASKS_HYBRID"
+echo ">>> [1/4] Running hybrid tracker..."
+if [[ "$MODE" == "bbox" ]]; then
+    BBOXES_HYBRID="/output/bboxes_hybrid.csv"
+    BBOXES_TORCH="/output/bboxes_torch.csv"
 
-# Step 2: Run PyTorch reference tracker
-echo ""
-echo ">>> [2/3] Running PyTorch reference tracker..."
-python /app/sam2_torch_video_tracker.py \
-    --video "$VIDEO" \
-    $PROMPT_ARG \
-    --checkpoint "$CHECKPOINT" \
-    --save-masks "$MASKS_TORCH"
+    python /app/sam2_hybrid_video_tracker.py \
+        --video "$VIDEO" \
+        $PROMPT_ARG \
+        --model-dir "$MODEL_DIR" \
+        --onnx-dir "$ONNX_DIR" \
+        --output /output/output_tracked_hybrid.mp4 \
+        --bbox-only \
+        --save-bboxes "$BBOXES_HYBRID"
 
-# Step 3: Compare masks
-echo ""
-echo ">>> [3/4] Comparing masks..."
-python /app/compare_masks.py \
-    "$MASKS_HYBRID" "$MASKS_TORCH" \
-    --label-a "Hybrid" \
-    --label-b "PyTorch" \
-    --skip-first 5 \
-    --csv "$CSV_OUT" \
-    --overlay-dir "$OVERLAY_DIR"
+    # Step 2: Run PyTorch reference tracker (still saves masks — we extract bboxes from them)
+    echo ""
+    echo ">>> [2/4] Running PyTorch reference tracker..."
+    python /app/sam2_torch_video_tracker.py \
+        --video "$VIDEO" \
+        $PROMPT_ARG \
+        --checkpoint "$CHECKPOINT" \
+        --save-masks "$MASKS_TORCH" \
+        --save-bboxes "$BBOXES_TORCH"
 
-# Step 4: Overlay comparison video
-echo ""
-echo ">>> [4/4] Generating overlay video..."
-OVERLAY_VIDEO="/output/compare_overlay_video.mp4"
-python /app/overlay_compare_video.py \
-    --video "$VIDEO" \
-    --masks-a "$MASKS_HYBRID" \
-    --masks-b "$MASKS_TORCH" \
-    --label-a "Hybrid" \
-    --label-b "PyTorch" \
-    --output "$OVERLAY_VIDEO"
+    # Step 3: Compare bboxes
+    echo ""
+    echo ">>> [3/4] Comparing bboxes..."
+    python /app/compare_masks.py \
+        "$BBOXES_HYBRID" "$BBOXES_TORCH" \
+        --mode bbox \
+        --label-a "Hybrid" \
+        --label-b "PyTorch" \
+        --skip-first 5 \
+        --csv "$CSV_OUT"
 
-echo ""
-echo "Results:"
-echo "  CSV:      $CSV_OUT"
-echo "  Overlays: $OVERLAY_DIR"
-echo "  Video:    $OVERLAY_VIDEO"
+    # Step 4: Overlay comparison video
+    echo ""
+    echo ">>> [4/4] Generating bbox overlay video..."
+    OVERLAY_VIDEO="/output/compare_overlay_video.mp4"
+    python /app/overlay_compare_video.py \
+        --video "$VIDEO" \
+        --mode bbox \
+        --bboxes-a "$BBOXES_HYBRID" \
+        --bboxes-b "$BBOXES_TORCH" \
+        --label-a "Hybrid" \
+        --label-b "PyTorch" \
+        --output "$OVERLAY_VIDEO"
+
+    echo ""
+    echo "Results:"
+    echo "  CSV:   $CSV_OUT"
+    echo "  Video: $OVERLAY_VIDEO"
+else
+    python /app/sam2_hybrid_video_tracker.py \
+        --video "$VIDEO" \
+        $PROMPT_ARG \
+        --model-dir "$MODEL_DIR" \
+        --onnx-dir "$ONNX_DIR" \
+        --output /output/output_tracked_hybrid.mp4 \
+        --save-masks "$MASKS_HYBRID"
+
+    # Step 2: Run PyTorch reference tracker
+    echo ""
+    echo ">>> [2/4] Running PyTorch reference tracker..."
+    python /app/sam2_torch_video_tracker.py \
+        --video "$VIDEO" \
+        $PROMPT_ARG \
+        --checkpoint "$CHECKPOINT" \
+        --save-masks "$MASKS_TORCH"
+
+    # Step 3: Compare masks
+    echo ""
+    echo ">>> [3/4] Comparing masks..."
+    python /app/compare_masks.py \
+        "$MASKS_HYBRID" "$MASKS_TORCH" \
+        --label-a "Hybrid" \
+        --label-b "PyTorch" \
+        --skip-first 5 \
+        --csv "$CSV_OUT" \
+        --overlay-dir "$OVERLAY_DIR"
+
+    # Step 4: Overlay comparison video
+    echo ""
+    echo ">>> [4/4] Generating overlay video..."
+    OVERLAY_VIDEO="/output/compare_overlay_video.mp4"
+    python /app/overlay_compare_video.py \
+        --video "$VIDEO" \
+        --masks-a "$MASKS_HYBRID" \
+        --masks-b "$MASKS_TORCH" \
+        --label-a "Hybrid" \
+        --label-b "PyTorch" \
+        --output "$OVERLAY_VIDEO"
+
+    echo ""
+    echo "Results:"
+    echo "  CSV:      $CSV_OUT"
+    echo "  Overlays: $OVERLAY_DIR"
+    echo "  Video:    $OVERLAY_VIDEO"
+fi

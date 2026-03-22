@@ -229,6 +229,25 @@ def overlay_mask(frame, mask, color=(0, 255, 0), alpha=0.4):
     return out
 
 
+def bbox_from_mask_gpu(pred_mask, orig_w, orig_h):
+    """Extract bbox from 256x256 pred_mask logits, scale to original coords."""
+    mask = (pred_mask[0, 0] > 0.0)
+    ys, xs = torch.where(mask)
+    if len(xs) == 0:
+        return None
+    sx, sy = orig_w / pred_mask.shape[3], orig_h / pred_mask.shape[2]
+    return (int(xs.min().item() * sx), int(ys.min().item() * sy),
+            int(xs.max().item() * sx), int(ys.max().item() * sy))
+
+
+def draw_bbox(frame, bbox, color=(0, 255, 0), thickness=2):
+    """Draw bounding box rectangle on frame."""
+    out = frame.copy()
+    if bbox:
+        cv2.rectangle(out, (bbox[0], bbox[1]), (bbox[2], bbox[3]), color, thickness)
+    return out
+
+
 # ─── Threaded video I/O ─────────────────────────────────────────────────────
 
 class VideoReaderThread:
@@ -294,6 +313,10 @@ def main():
     ap.add_argument("--onnx-dir", default="/models/sam2/tiny/onnx/")
     ap.add_argument("--output", default="/output/output_tracked_hybrid.mp4")
     ap.add_argument("--save-masks", default=None, help="Directory to save per-frame binary masks (.npz)")
+    ap.add_argument("--bbox-only", action="store_true",
+                    help="Output bounding boxes instead of full masks (lighter postprocessing)")
+    ap.add_argument("--save-bboxes", default=None,
+                    help="Path to write per-frame bbox CSV (frame_idx,x1,y1,x2,y2,iou)")
     ap.add_argument("--max-frames", type=int, default=0, help="Stop after N frames (0=all)")
     ap.add_argument("--show", action="store_true")
     args = ap.parse_args()
@@ -306,6 +329,16 @@ def main():
     save_masks = args.save_masks
     if save_masks:
         os.makedirs(save_masks, exist_ok=True)
+
+    bbox_only = args.bbox_only
+    bbox_csv_file = None
+    bbox_csv_writer = None
+    if args.save_bboxes:
+        import csv
+        os.makedirs(os.path.dirname(args.save_bboxes) or ".", exist_ok=True)
+        bbox_csv_file = open(args.save_bboxes, "w", newline="")
+        bbox_csv_writer = csv.writer(bbox_csv_file)
+        bbox_csv_writer.writerow(["frame_idx", "x1", "y1", "x2", "y2", "iou"])
 
     # GPU constants (allocated once)
     mean_gpu = torch.tensor([123.675, 116.28, 103.53], device="cuda").view(1, 3, 1, 1)
@@ -489,13 +522,19 @@ def main():
                 is_cond=False,
             ))
 
-        # ── Visualize (only pred_mask + iou cross to CPU) ───────────
+        # ── Postprocess + Visualize ──────────────────────────────────
         e_post_s, e_post_e = ev(), ev()
         e_post_s.record(trt_stream)
-        with torch.cuda.stream(trt_stream):
-            logits = F.interpolate(pred_mask, size=(orig_h, orig_w),
-                                   mode="bilinear", align_corners=False)
-            mask_gpu = (logits[0, 0] > 0.0).byte()
+
+        if bbox_only:
+            # Bbox from 256x256 logits — no full-res interpolation needed
+            cur_bbox = bbox_from_mask_gpu(pred_mask, orig_w, orig_h)
+        else:
+            with torch.cuda.stream(trt_stream):
+                logits = F.interpolate(pred_mask, size=(orig_h, orig_w),
+                                       mode="bilinear", align_corners=False)
+                mask_gpu = (logits[0, 0] > 0.0).byte()
+
         e_post_e.record(trt_stream)
         trt_stream.synchronize()
 
@@ -509,17 +548,24 @@ def main():
             stats["mem_bank_build"].append(e_bank_s.elapsed_time(e_bank_e))
             stats["memory_attention"].append(e_matt_s.elapsed_time(e_matt_e))
 
-        binary_mask = mask_gpu.cpu().numpy()
         iou_val = iou.item()
         stats["iou"].append(iou_val)
 
-        if save_masks:
-            np.savez_compressed(
-                os.path.join(save_masks, f"{frame_idx:05d}.npz"),
-                mask=binary_mask,
-            )
+        if bbox_only:
+            if bbox_csv_writer and cur_bbox:
+                bbox_csv_writer.writerow([frame_idx, *cur_bbox, f"{iou_val:.4f}"])
+            elif bbox_csv_writer:
+                bbox_csv_writer.writerow([frame_idx, "", "", "", "", f"{iou_val:.4f}"])
+            vis = draw_bbox(frame, cur_bbox)
+        else:
+            binary_mask = mask_gpu.cpu().numpy()
+            if save_masks:
+                np.savez_compressed(
+                    os.path.join(save_masks, f"{frame_idx:05d}.npz"),
+                    mask=binary_mask,
+                )
+            vis = overlay_mask(frame, binary_mask)
 
-        vis = overlay_mask(frame, binary_mask)
         dt = time.perf_counter() - t0
         fps_now = 1.0 / dt if dt > 0 else 0
         cv2.putText(vis, f"frame {frame_idx}  iou={iou_val:.2f}  {fps_now:.1f} fps",
@@ -541,6 +587,9 @@ def main():
 
     reader.release()
     writer.release()
+    if bbox_csv_file:
+        bbox_csv_file.close()
+        print(f"Bboxes written to {args.save_bboxes}")
     if args.show:
         cv2.destroyAllWindows()
     print(f"Done — {frame_idx} frames written to {args.output}")

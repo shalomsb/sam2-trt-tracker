@@ -2,15 +2,17 @@
 cd "${0%/*}"
 
 function usage {
-    echo "usage: ./docker/launch.sh [-b/-d/-r/-c] [--onnx/--hybrid]"
+    echo "usage: ./docker/launch.sh [-b/-d/-r/-c] [--onnx/--hybrid] [--bbox]"
     echo "  -b  Build: setup models (export ONNX + build TRT engines)"
     echo "  -r  Run tracker (TRT default, --onnx for ONNX, --hybrid for TRT+ORT)"
     echo "  -c  Compare: hybrid vs PyTorch mask IoU comparison"
     echo "  -d  Develop: bash shell inside container"
+    echo "  --bbox  Output bounding boxes instead of masks"
 }
 
 ACTION=""
 BACKEND=""
+OUTPUT_MODE=""
 
 if [[ $# -lt 1 ]]; then usage && exit; fi
 
@@ -19,6 +21,7 @@ while [[ "$1" != "" ]]; do
         -b | -d | -r | -c ) ACTION=$1 ;;
         --onnx )       BACKEND="--onnx" ;;
         --hybrid )     BACKEND="--hybrid" ;;
+        --bbox )       OUTPUT_MODE="--bbox" ;;
         -h )           usage ; exit ;;
         * )            usage ; exit ;;
     esac
@@ -57,7 +60,7 @@ elif [[ $ACTION == '-r' ]] || [[ $ACTION == '-c' ]] || [[ $ACTION == '-d' ]]; th
         -v "$(pwd)/../output":/output \
         --entrypoint /opt/entrypoint.sh \
         $DOCKER_TAG:$DOCKER_TAG_VERSION \
-        $ACTION $BACKEND
+        $ACTION $BACKEND $OUTPUT_MODE
     exit
 
 else

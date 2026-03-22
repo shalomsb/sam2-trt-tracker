@@ -93,10 +93,44 @@ def save_overlay_image(a: np.ndarray, b: np.ndarray, iou_val: float,
     cv2.imwrite(path, canvas)
 
 
+def load_bboxes(csv_path: str) -> dict[int, tuple]:
+    """Load bbox CSV (frame_idx,x1,y1,x2,y2,iou) into {frame_idx: (x1,y1,x2,y2)}."""
+    bboxes = {}
+    with open(csv_path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            idx = int(row["frame_idx"])
+            if row["x1"] == "":
+                bboxes[idx] = None
+            else:
+                bboxes[idx] = (int(row["x1"]), int(row["y1"]),
+                               int(row["x2"]), int(row["y2"]))
+    return bboxes
+
+
+def compute_bbox_iou(a: tuple, b: tuple) -> float:
+    """Compute IoU between two (x1,y1,x2,y2) bounding boxes."""
+    if a is None or b is None:
+        return 0.0
+    x1 = max(a[0], b[0])
+    y1 = max(a[1], b[1])
+    x2 = min(a[2], b[2])
+    y2 = min(a[3], b[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    union = area_a + area_b - inter
+    if union == 0:
+        return 1.0 if inter == 0 else 0.0
+    return float(inter / union)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Compare two mask directories via IoU")
-    ap.add_argument("dir_a", help="First mask directory (e.g. TRT masks)")
-    ap.add_argument("dir_b", help="Second mask directory (e.g. PyTorch masks)")
+    ap.add_argument("dir_a", help="First mask directory or bbox CSV")
+    ap.add_argument("dir_b", help="Second mask directory or bbox CSV")
+    ap.add_argument("--mode", choices=["mask", "bbox"], default="mask",
+                    help="Comparison mode: 'mask' for .npz dirs, 'bbox' for CSV files")
     ap.add_argument("--label-a", default="A", help="Label for first directory")
     ap.add_argument("--label-b", default="B", help="Label for second directory")
     ap.add_argument("--csv", default=None, help="Path to write per-frame CSV")
@@ -105,47 +139,69 @@ def main():
     ap.add_argument("--skip-first", type=int, default=0, help="Skip first N frames from comparison")
     args = ap.parse_args()
 
-    masks_a = load_masks(args.dir_a)
-    masks_b = load_masks(args.dir_b)
+    if args.mode == "bbox":
+        bboxes_a = load_bboxes(args.dir_a)
+        bboxes_b = load_bboxes(args.dir_b)
+        common_idx = sorted(set(bboxes_a.keys()) & set(bboxes_b.keys()))
+        if args.skip_first:
+            common_idx = [i for i in common_idx if i >= args.skip_first]
+        if not common_idx:
+            print("ERROR: No common frames found in bbox CSVs!")
+            sys.exit(1)
+        print(f"Comparing {len(common_idx)} frames (bbox mode): "
+              f"{args.label_a} ({args.dir_a}) vs {args.label_b} ({args.dir_b})")
 
-    common = sorted(set(masks_a.keys()) & set(masks_b.keys()))
-    if args.skip_first:
-        common = common[args.skip_first:]
-    only_a = set(masks_a.keys()) - set(masks_b.keys())
-    only_b = set(masks_b.keys()) - set(masks_a.keys())
+        ious = []
+        csv_rows = []
+        for idx in common_idx:
+            iou_val = compute_bbox_iou(bboxes_a[idx], bboxes_b[idx])
+            ious.append(iou_val)
+            csv_rows.append({"frame": str(idx), "iou": f"{iou_val:.6f}"})
 
-    if only_a:
-        print(f"WARNING: {len(only_a)} masks only in {args.label_a}")
-    if only_b:
-        print(f"WARNING: {len(only_b)} masks only in {args.label_b}")
+        # Re-use common for summary (as string keys)
+        common = [str(i) for i in common_idx]
+    else:
+        masks_a = load_masks(args.dir_a)
+        masks_b = load_masks(args.dir_b)
 
-    if not common:
-        print("ERROR: No common mask files found!")
-        sys.exit(1)
+        common = sorted(set(masks_a.keys()) & set(masks_b.keys()))
+        if args.skip_first:
+            common = common[args.skip_first:]
+        only_a = set(masks_a.keys()) - set(masks_b.keys())
+        only_b = set(masks_b.keys()) - set(masks_a.keys())
 
-    print(f"Comparing {len(common)} frames: {args.label_a} ({args.dir_a}) vs {args.label_b} ({args.dir_b})")
+        if only_a:
+            print(f"WARNING: {len(only_a)} masks only in {args.label_a}")
+        if only_b:
+            print(f"WARNING: {len(only_b)} masks only in {args.label_b}")
 
-    if args.viz_dir:
-        os.makedirs(args.viz_dir, exist_ok=True)
-    if args.overlay_dir:
-        os.makedirs(args.overlay_dir, exist_ok=True)
+        if not common:
+            print("ERROR: No common mask files found!")
+            sys.exit(1)
 
-    ious = []
-    csv_rows = []
+        print(f"Comparing {len(common)} frames: {args.label_a} ({args.dir_a}) vs {args.label_b} ({args.dir_b})")
 
-    for fname in common:
-        iou = compute_iou(masks_a[fname], masks_b[fname])
-        ious.append(iou)
-        csv_rows.append({"frame": fname, "iou": f"{iou:.6f}"})
-
-        png_name = fname.replace(".npz", ".png")
         if args.viz_dir:
-            save_diff_image(masks_a[fname], masks_b[fname],
-                            os.path.join(args.viz_dir, png_name))
+            os.makedirs(args.viz_dir, exist_ok=True)
         if args.overlay_dir:
-            save_overlay_image(masks_a[fname], masks_b[fname], iou,
-                               args.label_a, args.label_b,
-                               os.path.join(args.overlay_dir, png_name))
+            os.makedirs(args.overlay_dir, exist_ok=True)
+
+        ious = []
+        csv_rows = []
+
+        for fname in common:
+            iou_val = compute_iou(masks_a[fname], masks_b[fname])
+            ious.append(iou_val)
+            csv_rows.append({"frame": fname, "iou": f"{iou_val:.6f}"})
+
+            png_name = fname.replace(".npz", ".png")
+            if args.viz_dir:
+                save_diff_image(masks_a[fname], masks_b[fname],
+                                os.path.join(args.viz_dir, png_name))
+            if args.overlay_dir:
+                save_overlay_image(masks_a[fname], masks_b[fname], iou_val,
+                                   args.label_a, args.label_b,
+                                   os.path.join(args.overlay_dir, png_name))
 
     # Write CSV
     if args.csv:
