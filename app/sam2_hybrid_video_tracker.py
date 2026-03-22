@@ -293,6 +293,8 @@ def main():
     ap.add_argument("--model-dir", default="/models/sam2/tiny/trt/")
     ap.add_argument("--onnx-dir", default="/models/sam2/tiny/onnx/")
     ap.add_argument("--output", default="/output/output_tracked_hybrid.mp4")
+    ap.add_argument("--save-masks", default=None, help="Directory to save per-frame binary masks (.npz)")
+    ap.add_argument("--max-frames", type=int, default=0, help="Stop after N frames (0=all)")
     ap.add_argument("--show", action="store_true")
     args = ap.parse_args()
 
@@ -300,6 +302,10 @@ def main():
         ap.error("must provide --bbox or --point")
     if args.bbox and args.point:
         ap.error("provide either --bbox or --point, not both")
+
+    save_masks = args.save_masks
+    if save_masks:
+        os.makedirs(save_masks, exist_ok=True)
 
     # GPU constants (allocated once)
     mean_gpu = torch.tensor([123.675, 116.28, 103.53], device="cuda").view(1, 3, 1, 1)
@@ -507,6 +513,12 @@ def main():
         iou_val = iou.item()
         stats["iou"].append(iou_val)
 
+        if save_masks:
+            np.savez_compressed(
+                os.path.join(save_masks, f"{frame_idx:05d}.npz"),
+                mask=binary_mask,
+            )
+
         vis = overlay_mask(frame, binary_mask)
         dt = time.perf_counter() - t0
         fps_now = 1.0 / dt if dt > 0 else 0
@@ -524,6 +536,8 @@ def main():
             print(f"  [{frame_idx:5d}/{total}]  iou={iou_val:.2f}  {fps_now:.1f} fps")
 
         frame_idx += 1
+        if args.max_frames and frame_idx >= args.max_frames:
+            break
 
     reader.release()
     writer.release()

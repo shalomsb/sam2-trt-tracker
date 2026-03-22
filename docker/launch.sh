@@ -2,9 +2,10 @@
 cd "${0%/*}"
 
 function usage {
-    echo "usage: ./docker/launch.sh [-b/-d/-r] [--onnx/--hybrid]"
+    echo "usage: ./docker/launch.sh [-b/-d/-r/-c] [--onnx/--hybrid]"
     echo "  -b  Build: setup models (export ONNX + build TRT engines)"
     echo "  -r  Run tracker (TRT default, --onnx for ONNX, --hybrid for TRT+ORT)"
+    echo "  -c  Compare: hybrid vs PyTorch mask IoU comparison"
     echo "  -d  Develop: bash shell inside container"
 }
 
@@ -15,7 +16,7 @@ if [[ $# -lt 1 ]]; then usage && exit; fi
 
 while [[ "$1" != "" ]]; do
     case $1 in
-        -b | -d | -r ) ACTION=$1 ;;
+        -b | -d | -r | -c ) ACTION=$1 ;;
         --onnx )       BACKEND="--onnx" ;;
         --hybrid )     BACKEND="--hybrid" ;;
         -h )           usage ; exit ;;
@@ -45,7 +46,7 @@ if [[ $ACTION == '-b' ]]; then
         $ACTION
     exit
 
-elif [[ $ACTION == '-r' ]] || [[ $ACTION == '-d' ]]; then
+elif [[ $ACTION == '-r' ]] || [[ $ACTION == '-c' ]] || [[ $ACTION == '-d' ]]; then
     docker run --name=${DOCKER_NAME} --rm \
         --net=host --ipc=host --shm-size=4g --privileged -it \
         --runtime=nvidia --gpus all \

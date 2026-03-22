@@ -47,40 +47,6 @@ else
     echo "    Already patched or not found"
 fi
 
-# ── Step 2b: Patch export to use static shapes for mask_decoder ──
-echo ""
-echo ">>> [2b/4] Patch export_sam2_onnx.py (fixed batch=1, num_points=1, no dynamic_axes)"
-EXPORT_SCRIPT="$SAM2_DIR/export_sam2_onnx.py"
-if [[ -f "$EXPORT_SCRIPT" ]] && grep -q "batch_size = 20" "$EXPORT_SCRIPT"; then
-    sed -i '/def export_mask_decoder/,/SUCCESS.*Mask Decoder/{
-        s/batch_size = 20/batch_size = 1/
-        s/torch.randn(batch_size,2,2)/torch.randn(1,1,2)/
-        s/torch.randn(batch_size,2)/torch.randn(1,1)/
-        s/torch.randn(batch_size,256,64,64)/torch.randn(1,256,64,64)/
-        s/"point_coords":{0: "batch_size",1:"num_points"},/# dynamic_axes removed for static export/
-        s/"point_labels": {0: "batch_size",1:"num_points"},//
-        s/"image_embed": {0: "batch_size"},//
-    }' "$EXPORT_SCRIPT"
-    # Replace dynamic_axes dict with empty dict
-    sed -i '/def export_mask_decoder/,/SUCCESS.*Mask Decoder/{
-        s/dynamic_axes = dynamic_axes/dynamic_axes = {}/
-    }' "$EXPORT_SCRIPT"
-    echo "    Patched"
-else
-    echo "    Already patched or not found"
-fi
-
-# # ── Step 2b: Patch export to use opset 20 (cleaner graph for TRT 10.3) ──
-# echo ""
-# echo ">>> [2b/4] Patch export opset 17 -> 20"
-# EXPORT_SCRIPT="$SAM2_DIR/export_sam2_onnx.py"
-# if [[ -f "$EXPORT_SCRIPT" ]] && grep -q "opset_version=17" "$EXPORT_SCRIPT"; then
-#     sed -i 's/opset_version=17/opset_version=20/g' "$EXPORT_SCRIPT"
-#     echo "    Patched"
-# else
-#     echo "    Already patched or not found"
-# fi
-
 # ── Step 3: Download SAM2.1 Hiera Tiny checkpoint ──
 echo ""
 echo ">>> [3/4] Download SAM2.1 Hiera Tiny checkpoint"

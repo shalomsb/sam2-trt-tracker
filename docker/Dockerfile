@@ -46,5 +46,8 @@ RUN wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/
     && apt-get update && apt-get install -y cudss \
     && rm -rf /var/lib/apt/lists/*
 
+# SAM2 package (for PyTorch reference tracker)
+RUN pip install --no-cache-dir SAM-2@git+https://github.com/facebookresearch/sam2.git
+
 WORKDIR /app
 CMD ["/opt/entrypoint.sh", "-r"]

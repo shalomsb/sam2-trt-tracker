@@ -26,7 +26,10 @@ echo "[2/4] mask_decoder"
 if [[ ! -f "$TRT_DIR/mask_decoder.engine" ]]; then
     trtexec --onnx=$ONNX_DIR/mask_decoder.onnx \
             --saveEngine=$TRT_DIR/mask_decoder.engine \
-            --fp16
+            --fp16 \
+            --minShapes=point_coords:1x1x2,point_labels:1x1,image_embed:1x256x64x64 \
+            --optShapes=point_coords:1x1x2,point_labels:1x1,image_embed:1x256x64x64 \
+            --maxShapes=point_coords:1x2x2,point_labels:1x2,image_embed:1x256x64x64
 else
     echo "    Already exists — skipping"
 fi
