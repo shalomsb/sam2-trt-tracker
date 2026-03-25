@@ -1,6 +1,6 @@
 # SAM2-TRT-Tracker
 
-Real-time video object segmentation using **SAM2.1 Hiera Tiny** accelerated with **TensorRT**.
+Real-time video object segmentation using **SAM2.1 Hiera Tiny** accelerated with **TensorRT** on **Jetson Orin**.
 
 Give it a video and a prompt (bounding box or point) on the first frame — it segments and tracks the object through every subsequent frame, entirely on the GPU.
 
@@ -28,7 +28,13 @@ Frame 0 (prompted)          Frame N (propagated)
                                     (sliding window)
 ```
 
-Four TensorRT FP16 engines run on a single CUDA stream:
+Three backends are available:
+
+- **TRT** (default) — 4 TensorRT FP16 engines on a single CUDA stream
+- **Hybrid** — 3 TRT engines + ONNX Runtime CUDA EP for memory attention (TRT 10.3 Myelin bug workaround)
+- **ONNX** — pure ONNX Runtime with CUDA EP (reference implementation)
+
+Engines:
 - **Image Encoder** — Hiera Tiny backbone
 - **Memory Attention** — fuses current frame with memory bank
 - **Mask Decoder** — predicts segmentation mask
@@ -39,18 +45,23 @@ Four TensorRT FP16 engines run on a single CUDA stream:
 ```
 sam2-trt-tracker/
 ├── app/
-│   ├── sam2_trt_video_tracker.py      # TensorRT tracker (main)
-│   └── sam2_onnx_video_tracker.py     # ONNX Runtime tracker (reference)
+│   ├── sam2_trt_video_tracker.py      # TensorRT tracker
+│   ├── sam2_hybrid_video_tracker.py   # Hybrid TRT + ONNX Runtime tracker
+│   ├── sam2_onnx_video_tracker.py     # ONNX Runtime tracker (reference)
+│   ├── compare_masks.py              # IoU comparison between mask sets
+│   └── overlay_compare_video.py      # Side-by-side overlay video generator
 ├── docker/
-│   ├── Dockerfile                     # Based on nvcr.io/nvidia/tensorrt:26.02-py3
-│   ├── launch.sh                      # Build / Run / Dev entry point
+│   ├── Dockerfile                     # Based on nvcr.io/nvidia/l4t-jetpack:r36.4.0
+│   ├── launch.sh                      # Build / Run / Compare / Dev entry point
 │   ├── entrypoint.sh                  # Container entrypoint
 │   ├── requirements.txt               # Python dependencies
 │   └── scripts/
 │       ├── setup_models.sh            # Clone SAM2 repo, export ONNX
 │       ├── build_trt_engines.sh       # Convert ONNX to TRT engines
 │       ├── run_trt_tracker.sh         # Run TRT tracker
-│       └── run_onnx_tracker.sh        # Run ONNX tracker
+│       ├── run_onnx_tracker.sh        # Run ONNX tracker
+│       ├── run_hybrid_tracker.sh      # Run hybrid tracker
+│       └── run_compare.sh            # Run comparison pipeline
 ├── models/sam2/tiny/
 │   ├── onnx/                          # Exported ONNX models (generated)
 │   └── trt/                           # TensorRT engines (generated)
@@ -62,7 +73,7 @@ sam2-trt-tracker/
 
 ## Requirements
 
-- NVIDIA GPU (tested on Jetson Orin / desktop GPUs with TensorRT)
+- NVIDIA Jetson Orin (or desktop GPU with TensorRT)
 - Docker with NVIDIA Container Toolkit
 - ~4 GB GPU memory
 
@@ -75,7 +86,7 @@ sam2-trt-tracker/
 ```
 
 This will:
-1. Build the Docker image from `nvcr.io/nvidia/tensorrt:26.02-py3`
+1. Build the Docker image from `nvcr.io/nvidia/l4t-jetpack:r36.4.0`
 2. Clone NVIDIA's SAM2 ONNX exporter, download the SAM2.1 Tiny checkpoint
 3. Export 4 ONNX models
 4. Convert ONNX to TensorRT FP16 engines
@@ -85,29 +96,74 @@ The TRT engines are saved to `models/sam2/tiny/trt/` (persisted on host).
 ### 2. Run the tracker
 
 ```bash
-# Track with a point prompt (default: center of frame)
+# TensorRT backend (default) — point prompt at center of frame
 ./docker/launch.sh -r
 
-# Custom point
+# Custom point prompt
 POINT=200,150 ./docker/launch.sh -r
 
 # Bounding box prompt
 BBOX=100,50,300,250 ./docker/launch.sh -r
 
+# Hybrid backend (TRT + ONNX Runtime for memory attention)
+./docker/launch.sh -r --hybrid
+
+# Hybrid with bounding box output instead of mask overlay
+./docker/launch.sh -r --hybrid --bbox
+
+# ONNX Runtime backend
+./docker/launch.sh -r --onnx
+
 # Custom input/output
 VIDEO=/streams/my_video.mp4 OUTPUT=/output/result.mp4 ./docker/launch.sh -r
 ```
 
-### 3. Development shell
+### 3. Compare hybrid vs PyTorch (mask IoU)
+
+```bash
+# Mask comparison — runs hybrid + PyTorch trackers, computes per-frame IoU
+./docker/launch.sh -c
+
+# Bounding box comparison
+./docker/launch.sh -c --bbox
+```
+
+This runs a 4-step pipeline:
+1. Run the hybrid tracker (saves per-frame masks/bboxes)
+2. Run the PyTorch reference tracker (downloads checkpoint automatically)
+3. Compare outputs via IoU, write CSV report
+4. Generate a side-by-side overlay video
+
+Results are written to `output/`:
+- `compare_iou.csv` — per-frame IoU scores
+- `compare_overlay_video.mp4` — side-by-side visualization
+- `compare_overlays/` — per-frame overlay images (mask mode)
+
+### 4. Development shell
 
 ```bash
 ./docker/launch.sh -d
 ```
 
-### ONNX Runtime (alternative backend)
+## launch.sh Reference
 
-```bash
-./docker/launch.sh -r --onnx
+```
+usage: ./docker/launch.sh [-b/-d/-r/-c] [--onnx/--hybrid] [--bbox]
+
+Actions:
+  -b          Build Docker image + export ONNX models + build TRT engines
+  -r          Run tracker
+  -c          Compare hybrid vs PyTorch (mask/bbox IoU)
+  -d          Development shell inside container
+
+Backend (used with -r):
+  (default)   TensorRT (all 4 engines)
+  --hybrid    TRT + ONNX Runtime for memory attention
+  --onnx      ONNX Runtime only
+
+Options:
+  --bbox      Output bounding boxes instead of mask overlays (used with -r --hybrid or -c)
+  -h          Show usage
 ```
 
 ## Environment Variables
@@ -119,6 +175,10 @@ VIDEO=/streams/my_video.mp4 OUTPUT=/output/result.mp4 ./docker/launch.sh -r
 | `BBOX` | — | Bounding box `x1,y1,x2,y2` (overrides `POINT`) |
 | `OUTPUT` | `/output/output_tracked_trt.mp4` | Output video path |
 | `MODEL_DIR` | `/models/sam2/tiny/trt/` | TensorRT engines directory |
+| `ONNX_DIR` | `/models/sam2/tiny/onnx/` | ONNX models directory (hybrid/onnx) |
+| `CHECKPOINT` | `/models/sam2/tiny/sam2.1_hiera_tiny.pt` | PyTorch checkpoint (compare mode) |
+| `MAX_FRAMES` | `350` | Max frames for comparison runs |
+| `SAVE_BBOXES` | `/output/bboxes.csv` | Bounding box CSV output (hybrid --bbox) |
 
 ## How It Works
 
