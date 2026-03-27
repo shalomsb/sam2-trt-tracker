@@ -7,6 +7,7 @@ Only the raw frame (in) and binary mask (out) cross PCIe.
 
 import argparse
 import os
+import subprocess
 import time
 
 import cv2
@@ -242,6 +243,17 @@ def main():
     if args.show:
         cv2.destroyAllWindows()
     print(f"Done — {frame_idx} frames written to {args.output}")
+
+    # Re-encode mp4v → H.264 so the video plays in VS Code / browsers.
+    h264_path = args.output.replace(".mp4", "_h264.mp4")
+    print(f"Re-encoding to H.264: {h264_path}")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", args.output, "-c:v", "libx264", "-crf", "23", h264_path],
+        capture_output=True,
+    )
+    if os.path.isfile(h264_path):
+        os.replace(h264_path, args.output)
+        print(f"H.264 output: {args.output}")
 
     ts.print_summary(frame_idx)
     ts.print_iou_summary()

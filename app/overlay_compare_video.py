@@ -9,6 +9,7 @@ frame with different colors. Outputs a single video.
 import argparse
 import csv
 import os
+import subprocess
 
 import cv2
 import numpy as np
@@ -163,6 +164,17 @@ def main():
     cap.release()
     writer.release()
     print(f"Done — {frame_idx} frames written to {args.output}")
+
+    # Re-encode mp4v → H.264 so the video plays in VS Code / browsers.
+    h264_path = args.output.replace(".mp4", "_h264.mp4")
+    print(f"Re-encoding to H.264: {h264_path}")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", args.output, "-c:v", "libx264", "-crf", "23", h264_path],
+        capture_output=True,
+    )
+    if os.path.isfile(h264_path):
+        os.replace(h264_path, args.output)
+        print(f"H.264 output: {args.output}")
 
 
 if __name__ == "__main__":

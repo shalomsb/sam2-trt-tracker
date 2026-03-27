@@ -7,6 +7,7 @@
 
 import argparse
 import os
+import subprocess
 import time
 
 import cv2
@@ -75,16 +76,22 @@ def main():
     menc = TRTEngine(os.path.join(args.model_dir, "memory_encoder.engine"), trt_stream)
     matt = TRTEngine(os.path.join(args.model_dir, "memory_attention.engine"), trt_stream)
 
+    # Print engine I/O info for debugging (names, shapes, dtypes)
     for label, e in [("image_encoder", enc), ("mask_decoder", dec),
                      ("memory_encoder", menc), ("memory_attention", matt)]:
         e.print_io(label)
 
     # ── Video I/O ─────────────────────────────────────────────────────
+    # We use threaded reader that decodes video frames in a background thread, so the GPU can start processing the next
+    # frame without waiting for the next one to decode.
     reader = VideoReaderThread(args.video)
+    # Get video properties for setting up the writer and for scaling prompts. 
     w0, h0, fps_in = reader.width, reader.height, reader.fps
     total = reader.frame_count
     print(f"Video: {w0}x{h0} @ {fps_in:.1f} fps, {total} frames")
 
+    # The writer thread encodes and saves output frames in the background, so the main loop can move on to the next frame
+    # without waiting for disk I/O. We wirte the output at the same resolution and same fps as the input.
     writer = VideoWriterThread(
         args.output, cv2.VideoWriter_fourcc(*"mp4v"), fps_in, (w0, h0)
     )
@@ -125,19 +132,28 @@ def main():
 
     # ── Tracking loop ─────────────────────────────────────────────────
     while True:
-        frame = reader.read()  # blocks until the reader thread has a frame ready
+        frame = reader.read()  # blocks until the reader thread has a frame ready (None = video ended)
         if frame is None:
             break
-        t0 = time.perf_counter()
+        t0 = time.perf_counter()  # wall-clock timer for FPS display
 
-        # Preprocess: BGR uint8 numpy → normalised [1,3,1024,1024] float32 on GPU
+        # Preprocess: BGR uint8 numpy (e.g. 1280×720) → RGB → resize 1024×1024 → normalize
+        # → [1,3,1024,1024] float32 on GPU. Also returns orig_h, orig_w to scale mask back later.
+        # ev() creates CUDA timing events — stamps on the GPU timeline for accurate timing.
         e_pre_s, e_pre_e = ev(), ev()
         e_pre_s.record(trt_stream)
+        # "with torch.cuda.stream" makes PyTorch ops (resize, normalize) run on our TRT stream
+        # instead of the default stream, so they stay in order with the TRT engine calls.
         with torch.cuda.stream(trt_stream):
             img, orig_h, orig_w = preprocess_gpu(frame, mean_gpu, std_gpu)
         e_pre_e.record(trt_stream)
 
-        # Image encoder: img → pixel features + vision features for decoder and attention
+        # Image encoder: img → 5 outputs (all references to enc's pre-allocated buffers):
+        #   pix_feat     [1,256,64,64]  → memory encoder (pixel-level features)
+        #   hr0          [1,32,256,256] → mask decoder (high-res features for fine detail)
+        #   hr1          [1,64,128,128] → mask decoder (mid-res features)
+        #   vision_feats [1,4096,256]   → mask decoder or memory attention (main vision features)
+        #   vision_pos   [1,4096,256]   → memory attention (positional encoding of vision features)
         e_enc_s, e_enc_e = ev(), ev()
         e_enc_s.record(trt_stream)
         pix_feat, hr0, hr1, vision_feats, vision_pos = enc({"image": img})
@@ -157,13 +173,15 @@ def main():
                 point_labels = torch.tensor(
                     [[2.0, 3.0]], dtype=torch.float32, device="cuda"
                 )
+            # If it's a point prompt, we encode it as a single point with label 1.0 (foreground).
             else:
                 pt = [float(v) for v in args.point.split(",")]
-                # Single foreground point with label 1.0.
+                # we multiply by sx, sy to scale the point from original resolution to 1024x1024 model input size.
                 point_coords = torch.tensor(
                     [[[pt[0]*sx, pt[1]*sy]]],
                     dtype=torch.float32, device="cuda",
                 )
+                # label 1.0 = foreground point, 0.0 = background point.
                 point_labels = torch.tensor(
                     [[1.0]], dtype=torch.float32, device="cuda"
                 )
@@ -205,6 +223,10 @@ def main():
             # Pack stored memory frames into the 4 tensors memory_attention expects.
             e_bank_s, e_bank_e = ev(), ev()
             e_bank_s.record(trt_stream)
+            # mem0 -> [1,NUM_MASKMEM,256] object pointers,
+            # mem1 -> [1,NUM_MASKMEM,64,64,64] mask memory features,
+            # mem_pos -> [1,NUM_MASKMEM*4096+NUM_MASKMEM*4,64] positional encodings for both (4096 for mem1's spatial features, 4 for mem0's object pointers),
+            # cond_diff -> scalar tensor with current frame_idx - cond_frame.frame_idx, to tell the model how many frames ago the conditioning frame was. 
             mem0, mem1, mem_pos, cond_diff = bank.build_memory_inputs(frame_idx)
             e_bank_e.record(trt_stream)
 
@@ -325,6 +347,18 @@ def main():
     if args.show:
         cv2.destroyAllWindows()
     print(f"Done — {frame_idx} frames written to {args.output}")
+
+    # Re-encode mp4v → H.264 so the video plays in VS Code / browsers.
+    # OpenCV on Jetson can't write H.264 directly, so we do it as a post-step.
+    h264_path = args.output.replace(".mp4", "_h264.mp4")
+    print(f"Re-encoding to H.264: {h264_path}")
+    subprocess.run(
+        ["ffmpeg", "-y", "-i", args.output, "-c:v", "libx264", "-crf", "23", h264_path],
+        capture_output=True,
+    )
+    if os.path.isfile(h264_path):
+        os.replace(h264_path, args.output)
+        print(f"H.264 output: {args.output}")
 
     ts.print_summary(frame_idx)
     ts.print_iou_summary()
