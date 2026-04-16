@@ -26,9 +26,9 @@ done
 
 if [[ $ACTION == "" ]]; then usage && exit; fi
 
-DOCKER_TAG=sam2-tracker
+DOCKER_TAG=edgetam-tracker
 DOCKER_TAG_VERSION=v1.0
-DOCKER_NAME=sam2-tracker
+DOCKER_NAME=edgetam-tracker
 
 if [[ $ACTION == '-b' ]]; then
     time \

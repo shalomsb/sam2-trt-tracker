@@ -2,6 +2,7 @@
 *.engine
 *.onnx
 *.pt
+*.pth
 *.plan
 
 # Python

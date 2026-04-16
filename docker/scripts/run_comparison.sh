@@ -5,8 +5,8 @@ START=$SECONDS
 VIDEO="${VIDEO:-/streams/sample.mp4}"
 POINT="${POINT:-640,360}"
 BBOX="${BBOX:-}"
-MODEL_DIR_TRT="${MODEL_DIR_TRT:-/models/sam2/tiny/trt/}"
-CHECKPOINT="${CHECKPOINT:-/models/sam2/tiny/sam2.1_hiera_tiny.pt}"
+MODEL_DIR_TRT="${MODEL_DIR_TRT:-/models/edgetam/trt/}"
+CHECKPOINT="${CHECKPOINT:-/models/edgetam/edgetam.pt}"
 
 DURATION="${DURATION:-15}"
 MASKS_TRT="/output/masks_trt"
@@ -30,13 +30,13 @@ rm -rf "$MASKS_TRT" "$MASKS_PT" \
     /output/iou_diff_trt_vs_pt /output/iou_overlay_trt_vs_pt
 
 echo "============================================"
-echo "  SAM2.1 — TRT vs PyTorch Comparison"
+echo "  EdgeTAM — TRT vs PyTorch Comparison"
 echo "============================================"
 
 # Step 1: Run TRT tracker
 echo ""
 echo ">>> [1/3] Running TRT tracker..."
-python /app/sam2_trt_video_tracker.py \
+python /app/edgetam_trt_video_tracker.py \
     --video "$VIDEO" \
     $PROMPT_ARG \
     --model-dir "$MODEL_DIR_TRT" \
@@ -46,7 +46,7 @@ python /app/sam2_trt_video_tracker.py \
 # Step 2: Run PyTorch tracker
 echo ""
 echo ">>> [2/3] Running PyTorch reference tracker..."
-python /app/sam2_pytorch_video_tracker.py \
+python /app/edgetam_pytorch_video_tracker.py \
     --video "$VIDEO" \
     $PROMPT_ARG \
     --checkpoint "$CHECKPOINT" \

@@ -3,10 +3,10 @@ set -e
 START=$SECONDS
 
 VIDEO="${VIDEO:-/streams/sample.mp4}"
-POINT="${POINT:-640,360}"
+POINT="${POINT:-334,361}"
 BBOX="${BBOX:-}"
 OUTPUT="${OUTPUT:-/output/output_tracked_trt.mp4}"
-MODEL_DIR="${MODEL_DIR:-/models/sam2/tiny/trt/}"
+MODEL_DIR="${MODEL_DIR:-/models/edgetam/trt/}"
 
 PROMPT_ARG=""
 if [[ -n "$BBOX" ]]; then
@@ -15,7 +15,7 @@ else
     PROMPT_ARG="--point $POINT"
 fi
 
-python /app/sam2_trt_video_tracker.py \
+python /app/edgetam_trt_video_tracker.py \
     --video "$VIDEO" \
     $PROMPT_ARG \
     --model-dir "$MODEL_DIR" \

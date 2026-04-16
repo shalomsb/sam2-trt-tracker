@@ -20,15 +20,22 @@ RUN uv pip install --python /opt/venv/bin/python \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
     --no-cache-dir -r /opt/requirements.txt
 
-# SAM-2 package for PyTorch reference tracker (not on PyPI, install from GitHub)
+# EdgeTAM package (for PyTorch reference tracker)
 RUN SAM2_BUILD_CUDA=0 uv pip install --python /opt/venv/bin/python --no-cache-dir \
-    "SAM-2 @ git+https://github.com/facebookresearch/sam2.git"
+    "EdgeTAM @ git+https://github.com/facebookresearch/EdgeTAM.git"
 
 # Expose pip-installed CUDA 12 libs for onnxruntime-gpu
 ENV LD_LIBRARY_PATH="/opt/venv/lib/python3.12/site-packages/nvidia/cublas/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cuda_runtime/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cufft/lib:/opt/venv/lib/python3.12/site-packages/nvidia/curand/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cusolver/lib:/opt/venv/lib/python3.12/site-packages/nvidia/cusparse/lib:/opt/venv/lib/python3.12/site-packages/nvidia/nvjitlink/lib:${LD_LIBRARY_PATH}"
 
 # App code
 COPY app/ /app/
+
+# EdgeTAM ONNX export code (used by setup_models.sh)
+COPY edgetam_export/onnx_export/ /opt/edgetam_export/onnx_export/
+COPY edgetam_export/export_edgetam_onnx.py /opt/edgetam_export/
+
+# Pre-patched position_encoding.py for ONNX (complex -> real-valued RoPE)
+COPY edgetam_export/patches/ /opt/patches/
 
 # Scripts
 COPY docker/scripts/ /opt/scripts/
@@ -39,7 +46,7 @@ COPY docker/entrypoint.sh /opt/entrypoint.sh
 RUN chmod +x /opt/entrypoint.sh
 
 # Create mount point directories
-RUN mkdir -p /models/sam2/tiny/onnx /models/sam2/tiny/trt /streams /output
+RUN mkdir -p /models/edgetam/onnx /models/edgetam/trt /streams /output
 
 WORKDIR /app
 CMD ["/opt/entrypoint.sh", "-r"]
